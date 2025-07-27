@@ -1,0 +1,313 @@
+---
+title: "Development Analysis from a Macroeconomic perspective"
+author: "Parthiba Bandyopadhyay"
+date: "2025-06-26"
+output:
+  word_document:
+    toc: true
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+---
+Introduction:
+This document analyzes the relationship between GDP growth, inflation, real interest rate, and current account balance across countries using World Bank data.
+[A]. Data Preparation:
+Here we'll first try to install and load the required packages useful for subsequent analysis and furthermore rename the columns followed by proper missing data management to execute everything properly. We will clean the data for each one of the prompts respectively.
+```{r setup, inclue = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+# Load required libraries
+library(tidyverse)
+library(readxl)
+library(plm)
+library(fixest)
+library(urca)
+library(lmtest)
+library(dplyr)
+library(ggplot2)
+library(panelvar)
+library(tibble)
+library(reshape2)
+## ----data-import----
+
+# Load dataset
+df <- read_excel("world_bank_data_2025.xlsx")
+# View structure
+glimpse(df)
+## ----rename-clean----
+# Rename columns for clarity
+df <- df %>%
+  rename(
+    country          = country_name,
+    iso_code         = country_id,
+    year             = year,
+    inflation        = `Inflation (CPI %)`,
+    gdp_current      = `GDP (Current USD)`,
+    gdp_percap       = `GDP per Capita (Current USD)`,
+    unemployment     = `Unemployment Rate (%)`,
+    real_rate        = `Interest Rate (Real, %)`,
+    gdp_deflator     = `Inflation (GDP Deflator, %)`,
+    gdp_growth       = `GDP Growth (% Annual)`,
+    current_account  = `Current Account Balance (% GDP)`,
+    gov_expense      = `Government Expense (% of GDP)`,
+    gov_revenue      = `Government Revenue (% of GDP)`,
+    tax_revenue      = `Tax Revenue (% of GDP)`,
+    gni              = `Gross National Income (USD)`,
+    public_debt      = `Public Debt (% of GDP)`
+  )
+
+# Sort for stability
+df <- df %>% arrange(country, year)
+
+## ----prompt-specific-cleaning----
+
+# Prompt 1: GDP Growth vs Real Interest Rate
+df_clean1 <- df %>%
+  filter(!is.na(gdp_growth) & !is.na(real_rate)) %>%
+  pdata.frame(index = c("country", "year"))
+
+# Prompt 2: Inflation vs GDP Growth
+df_clean2 <- df %>%
+  filter(!is.na(gdp_growth) & !is.na(inflation)) %>%
+  pdata.frame(index = c("country", "year"))
+
+# Prompt 3: Long-run relationship between Real Interest Rate and Inflation
+df_clean3 <- df %>%
+  filter(!is.na(real_rate) & !is.na(inflation)) %>%
+  pdata.frame(index = c("country", "year"))
+
+# Prompt 4: Inflation effect on Current Account Balance
+df_clean4 <- df %>%
+  filter(!is.na(current_account) & !is.na(inflation)) %>%
+  pdata.frame(index = c("country", "year"))
+```
+1. Data Analysis for GDP growth vs. Real Interest Rate:
+Here we will try to run fixed effects model and random effects model followed by Hausman test to choose the appropriate one. Then we'll provide a major country level visualization for India, China and the United States.
+```{r}
+## ----prompt1-fe-re----
+# Fixed Effects Model (within estimator)
+model_fe1 <- plm(gdp_growth ~ real_rate,data = df_clean1,model = "within")
+# Random Effects Model
+model_re1 <- plm(gdp_growth ~ real_rate,data = df_clean1,model = "random")
+## ----hausman-test----
+# Hausman Test to choose between FE and RE
+hausman_test1 <- phtest(model_fe1, model_re1)
+print(hausman_test1)
+## ----Visualization-----
+df_plot1 <- as.data.frame(df_clean1) %>%
+  mutate(
+    country = as.character(country),
+    real_rate = as.numeric(real_rate),
+    gdp_growth = as.numeric(gdp_growth)
+  ) %>%
+  filter(
+    !is.na(real_rate),
+    !is.na(gdp_growth),
+    real_rate > -20, real_rate < 20,
+    gdp_growth > -20, gdp_growth < 20
+  )
+df_plot1_filtered <- df_plot1 %>%
+  filter(country %in% c("India", "China", "United States"))
+
+
+ggplot(df_plot1_filtered, aes(x = real_rate, y = gdp_growth)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  facet_wrap(~country, scales = "free_y") +
+  labs(
+    title = "GDP Growth vs Real Interest Rate (Selected Countries)",
+    x = "Real Interest Rate (%)",
+    y = "GDP Growth Rate (%)"
+  )
+## -----Pretty summary table------
+library(stargazer)
+stargazer(model_fe1, model_re1, type = "text",
+          title = "GDP Growth vs Real Interest Rate",
+          column.labels = c("Fixed Effects", "Random Effects"),
+          keep.stat = c("n", "rsq", "adj.rsq", "f", "ser"))
+```
+Here we have run both random effects model and fixed effects model and then by Hausman test we finally chose RE model as p value was 0.1148. In the RE specification, the coefficient of the real interest rate was positive (≈ 0.03) but it was marginally significant (as p ≈ 0.086). This suggests a weakly statistically significant positive association between real interest rates and economic growth at the global level. The explanatory power of the model was very low, with R² ≈ 0.002, implying that real interest rate alone explains very little of the total variation in GDP growth across countries.
+
+The country level visualizations provided us further meaningful insights. For China and the United States we have seen slightly negative relationships, which is consistent with the theoretical underpinning that as real interest rate rises, the investment level goes down thereby reducing the growth. India, however, showed no clear pattern, indicating a possible domination of structural and/or policy factors. The slope is nearly flat (or very slightly negative) with high confidence intervals; which means high dispersion in GDP growth across similar real rates of interest. Hence, this analysis reveals that while real interest rates might have very little influence on GDP growth in some economies, the effect is neither uniform nor strong enough to draw generalized conclusions across the economies.
+
+
+2. Data Analysis for GDP growth vs. Inflation:
+Here we will again try to run fixed effects model and random effects model followed by Hausman test to choose the appropriate one. Then we'll provide a major country level visualization for India, China and the United States.
+```{r}
+## ----prompt2-fe-re----
+
+# FE model: GDP Growth ~ Inflation
+model_fe2 <- plm(
+  gdp_growth ~ inflation,
+  data = df_clean2,
+  model = "within"
+)
+
+# RE model: GDP Growth ~ Inflation
+model_re2 <- plm(
+  gdp_growth ~ inflation,
+  data = df_clean2,
+  model = "random"
+)
+
+## ----hausman-test-2----
+hausman_test2 <- phtest(model_fe2, model_re2)
+print(hausman_test2)
+
+## ----pretty-summary-2----
+library(stargazer)
+
+stargazer(model_fe2, model_re2, type = "text",
+          title = "GDP Growth vs Inflation",
+          column.labels = c("Fixed Effects", "Random Effects"),
+          keep.stat = c("n", "rsq", "adj.rsq", "f", "ser"))
+
+##-----Visualization-----
+df_plot2_filtered <- as.data.frame(df_clean2) %>%
+  mutate(
+    country = as.character(country),
+    inflation = as.numeric(inflation),
+    gdp_growth = as.numeric(gdp_growth)
+  ) %>%
+  filter(
+    country %in% c("India", "China", "United States"),
+    !is.na(inflation),
+    !is.na(gdp_growth),
+    inflation > -10, inflation < 50,
+    gdp_growth > -20, gdp_growth < 20
+  )
+ggplot(df_plot2_filtered, aes(x = inflation, y = gdp_growth)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+  facet_wrap(~country, scales = "free_y") +
+  labs(
+    title = "GDP Growth vs Inflation Rate (Selected Countries)",
+    x = "Inflation Rate (%)",
+    y = "GDP Growth Rate (%)"
+  )
+```
+Here too the Hausman test result impedes us to use the random effects model as p-value = 0.7696. We see here that there is a statistically significant negative relationship between inflation rate and GDP growth. However, the effect size is small with the coefficient for inflation being -0.0306 (p < 0.001), and the model explaining about 0.68% variation in the growth rates. The finding is consistent with macroeconomic theory implying rising inflation rates can have contractionary effects on GDP growth. However, we clearly see that R² ≈ 0.7%, implying a very low explanatory power of this model and indicating that inflation plays only a modest role in determining cross-country growth variations.
+
+From the diagrammatic exposition it is clear that China and US show positive relationship between inflation and GDP growth, which is contradictory to our panel regression results and also standard macroeconomic theory. This may be due to the two countries' growth driven policies or the type of inflation being most probably demand pull rather than cost push. For India, the line is nearly flat implying the presence of structural factors or other policy regimes may be very dominant thereby blurring the usual inflation-growth relationship.
+
+
+3. Cointegration between Real Interest Rate and Inflation:
+Here we'll try to see the long run cointegrating association between real interest rate and inflation rate. If a cointegrating relationship exists, it suggests that despite short-term deviations, the two variables move together in the long run.
+```{r}
+## ----prompt3-cointegration----
+
+# Load necessary packages
+library(tseries)
+library(urca)
+
+# Step 1: Prepare data for cointegration test
+df_cointegrate <- as.data.frame(df_clean3) %>%
+  select(country, year, inflation, real_rate) %>%
+  filter(!is.na(inflation) & !is.na(real_rate)) %>%
+  mutate(
+    inflation = as.numeric(inflation),
+    real_rate = as.numeric(real_rate)
+  )
+
+# Step 2: Filtering countries with at least 10 years of data
+top_countries <- df_cointegrate %>%
+  group_by(country) %>%
+  summarise(n_years = n()) %>%
+  filter(n_years >= 10) %>%
+  pull(country)
+
+df_panel <- df_cointegrate %>%
+  filter(country %in% top_countries)
+
+# Step 3: Convert to pdata.frame
+df_panel_p <- pdata.frame(df_panel, index = c("country", "year"))
+
+# Step 4: Estimate long-run relationship (panel model)
+coint_model <- plm(inflation ~ real_rate, data = df_panel_p, model = "within")
+
+# Step 5: Get residuals from long-run regression
+residuals_coint <- residuals(coint_model)
+
+# Step 6: Run ADF test on residuals
+adf_result <- adf.test(residuals_coint)
+print(adf_result)
+
+# -----------------------------
+# Country-specific cointegration test (e.g., India)
+# -----------------------------
+
+# Step A: Filter data for India
+india_df <- df_cointegrate %>% filter(country == "India")
+
+# Step B: Long-run OLS model for India
+model_india <- lm(inflation ~ real_rate, data = india_df)
+
+# Step C: ADF test on residuals for India
+resid_india <- residuals(model_india)
+adf.test(resid_india)
+```
+In the global (panel) level the inflation rate and the interest rate exhibit a cointegrated long term relationship assuring underlying macroeconomic theory (e.g. Fisher effect). However, this relationship breaks down when it comes to India. It may be due to the structural shifts, monetary interventions and policy oriented idiosyncrasies.
+
+
+4. Effect of Inflation on Current Account Balance:
+Here we will similarly try to run fixed effects model and random effects model followed by Hausman test to choose the appropriate one. Then we'll provide a major country level visualization for India, China and the United States.
+```{r}
+## ----prompt4-full----
+# Step 1: Prepare data
+df_panel4 <- as.data.frame(df_clean4) %>%
+  mutate(
+    country = as.character(country),
+    inflation = as.numeric(inflation),
+    current_account = as.numeric(current_account)
+  ) %>%
+  filter(!is.na(inflation), !is.na(current_account))
+
+# Step 2: Convert to panel format
+df_panel4_p <- pdata.frame(df_panel4, index = c("country", "year"))
+
+# Step 3: Run models
+model_fe4 <- plm(current_account ~ inflation, data = df_panel4_p, model = "within")
+model_re4 <- plm(current_account ~ inflation, data = df_panel4_p, model = "random")
+
+# Step 4: Hausman test
+hausman_test4 <- phtest(model_fe4, model_re4)
+print(hausman_test4)
+
+# Step 5: Pretty summary with stargazer
+stargazer(model_fe4, model_re4, type = "text",
+          title = "Effect of Inflation on Current Account Balance",
+          column.labels = c("Fixed Effects", "Random Effects"),
+          keep.stat = c("n", "rsq", "adj.rsq", "f", "ser"))
+
+# --------------------------
+# Visualization
+# --------------------------
+df_plot4 <- as.data.frame(df_panel4) %>%
+  mutate(
+    country = as.character(country),
+    inflation = as.numeric(inflation),
+    current_account = as.numeric(current_account)
+  ) %>%
+  filter(
+    country %in% c("India", "China", "United States"),
+    !is.na(inflation),
+    !is.na(current_account),
+    inflation > -10, inflation < 50,
+    current_account > -20, current_account < 20
+  )
+
+# Plotting
+ggplot(df_plot4, aes(x = inflation, y = current_account)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+  facet_wrap(~country, scales = "free_y") +
+  labs(
+    title = "Inflation vs Current Account Balance (% of GDP)",
+    x = "Inflation Rate (%)",
+    y = "Current Account Balance (% of GDP)"
+  )
+```
+Here by inspecting the results of Hausman test we go for fixed effects model; but see that inflation rate and current account balance are not significantly related to each other. It suggests that inflation is not a meaningful predictor of current account balances across countries, and other structural idiosyncrasies or policy factors likely play a more prominent role.
+
+The graphical exposition asserts that for China the relationship between current account balance and inflation is positive with a very wide confidence interval and narrow sample range. This relationship may be spurious or driven by isolated years. For the US and India, the relationship is negative implying that a domestic inflationary scenerio may increase imports and reduce export competitiveness leading to a higher deficit. For US, this may be also due to the global dollar dynamics and NOT MERELY just Inflation.
+
